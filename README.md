@@ -2,165 +2,124 @@
 
 一个功能强大的 AstrBot 抽奖插件，支持多种抽奖算法和灵活的配置选项。
 
-## 功能特点
+## 功能特性
 
-- 🎯 **多种抽奖算法**: 支持随机抽奖和加权抽奖
-- 🔧 **装饰器模式**: 使用装饰器轻松为抽奖类添加算法支持
-- 📊 **灵活配置**: 
-  - 设置奖品数量限制（可以为不限）
-  - 设置用户抽奖次数限制（可以为不限）
-  - 控制是否允许重复中奖
-- 📈 **统计功能**: 实时统计抽奖情况和中奖记录
-- 🎮 **易于扩展**: 可以轻松添加新的抽奖算法
+- 🎲 支持创建多种类型的抽奖活动
+- ⏰ 灵活的时间设置，可设置抽奖有效期
+- 🏆 支持多种奖品类型和数量配置
+- 📋 便捷的抽奖管理和查看功能
+- 🎯 公平的抽奖算法，确保随机性
+- 👥 支持多人参与，防止重复抽奖
 
-## 核心组件
+## 使用方法
 
-### 1. LotteryConfig (抽奖配置)
-```python
-from algorithm_lot import LotteryConfig
+### 基本命令
 
-config = LotteryConfig(
-    prize_limit=10,        # 每个奖品最多被抽取10次，None表示不限
-    user_draw_limit=5,     # 每个用户最多抽奖5次，None表示不限
-    allow_duplicate=True   # 是否允许用户重复中奖同一个奖品
-)
+#### 创建抽奖
+```
+/抽奖 创建 [id] [奖品类型数量] <描述> <有效时长> <次数>
 ```
 
-### 2. 抽奖算法装饰器
-```python
-from algorithm_lot import lottery_algorithm, LotteryConfig
+**参数说明：**
+- `[id]`: 抽奖活动的唯一标识符
+- `[奖品类型数量]`: 奖品类型的数量，例如3即有3种奖品
+- `<描述>`: 抽奖活动的描述信息
+- `<有效时长>`: 抽奖的有效时长，以秒为单位，设置为0或不填写表示永久有效。
+- `<次数>`: 抽奖活动的参与次数限制，设置为0或不填写表示无限次参与。
 
-@lottery_algorithm("random", LotteryConfig(user_draw_limit=3))
-class MyLottery(Lottery):
-    pass
+**示例：**
+```
+/抽奖 创建 summer2024 夏日狂欢抽奖 3 86400 1
+/抽奖 创建 daily001 每日签到奖励 2 43200 0
 ```
 
-### 3. 支持的算法类型
-- `"random"`: 随机抽奖算法
-- `"weighted"`: 加权抽奖算法（可设置不同奖品的中奖概率）
+#### 查看抽奖列表
+```
+/抽奖 列出
+```
+显示所有当前可以参与的抽奖活动，包括活动ID、描述、剩余时间等信息。
 
-## 使用示例
+#### 参与抽奖
+```
+/抽奖 [id]
+```
+参与指定ID的抽奖活动。每个用户在同一个抽奖活动中只能参与一次。
 
-### 基本使用
-```python
-from lottery import AdvancedLottery
-
-# 创建抽奖活动
-lottery = AdvancedLottery(
-    creater_id="admin_001",
-    id="新年抽奖",
-    description="2025新年抽奖活动",
-    prize_num=3
-)
-
-# 设置奖品
-lottery.set_prize(1, "一等奖：iPhone 15", "最新款苹果手机", "iphone15.jpg")
-lottery.set_prize(2, "二等奖：AirPods Pro", "苹果无线耳机", "airpods.jpg")
-lottery.set_prize(3, "三等奖：Apple Watch", "苹果智能手表", "watch.jpg")
-
-# 用户抽奖
-result = lottery.draw_prize("user_001")
-print(result.message)
-if result.success:
-    print(f"中奖奖品: {result.prize_name}")
+**示例：**
+```
+/抽奖 summer2024
+/抽奖 daily001
 ```
 
-### 自定义限制
-```python
-from algorithm_lot import lottery_algorithm, LotteryConfig
-from lottery import Lottery
+#### 设置奖品信息
+```
+/抽奖 奖品 [id] [num] [amount] [名称] <描述> <图片链接>
+```
+用于设置指定抽奖活动中特定奖品的详细信息。
 
-@lottery_algorithm("random", LotteryConfig(
-    prize_limit=1,          # 每个奖品只能被抽取1次
-    user_draw_limit=2,      # 每个用户最多抽奖2次
-    allow_duplicate=False   # 不允许重复中奖
-))
-class LimitedLottery(Lottery):
-    pass
+**参数说明：**
+- `[id]`: 抽奖活动的唯一标识符
+- `[num]`: 奖品编号（从1开始）
+- `[amount]`: 奖品数量，设置为0表示不限制数量
+- `[名称]`: 奖品的名称
+- `<描述>`: 奖品的详细描述（可选）
+- `<图片链接>`: 奖品的图片URL（可选）
 
-lottery = LimitedLottery("admin", "限量抽奖", "稀有奖品", 2)
+**示例：**
+```
+/抽奖 奖品 summer2024 1 0 iPhone15Pro 最新款苹果手机 https://example.com/iphone.jpg
+/抽奖 奖品 daily001 2 50 优惠券 50元购物优惠券 https://example.com/coupon.jpg
 ```
 
-### 加权抽奖
-```python
-from lottery import WeightedLottery
+#### 设置抽奖算法
+```
+/抽奖 方式 [id] <algorithm_id>
+```
+用于设置指定抽奖活动的抽奖算法。
 
-# 创建加权抽奖，不同奖品有不同中奖概率
-lottery = WeightedLottery(
-    creater_id="admin",
-    id="加权抽奖",
-    description="VIP专属抽奖",
-    prize_num=3,
-    weights={1: 0.1, 2: 0.3, 3: 0.6}  # 奖品权重
-)
+**参数说明：**
+- `[id]`: 抽奖活动的唯一标识符
+- `<algorithm_id>`: 抽奖算法ID（如：random、weighted、fair等）
+
+**示例：**
+```
+/抽奖 方式 summer2024 weighted
+/抽奖 方式 daily001 random
 ```
 
-### 动态配置
-```python
-# 运行时修改配置
-lottery.set_prize_limit(5)          # 修改奖品数量限制
-lottery.set_user_draw_limit(3)      # 修改用户抽奖次数限制
-lottery.set_allow_duplicate(False)  # 禁止重复中奖
+**支持的算法类型：**
+- `random`: 完全随机抽奖
+- `weighted`: 权重抽奖（根据奖品稀有度）
+- `fair`: 公平抽奖（确保分布均匀）
 
-# 重置抽奖状态
-lottery.reset_lottery_state()
-
-# 查看统计信息
-stats = lottery.get_lottery_statistics()
-print(stats)
+#### 获取帮助
 ```
-
-## API 文档
-
-### LotteryResult (抽奖结果)
-```python
-class LotteryResult:
-    user_id: str                    # 用户ID
-    prize_id: Optional[int]         # 中奖奖品ID，None表示未中奖
-    prize_name: Optional[str]       # 奖品名称
-    success: bool                   # 是否中奖
-    message: str                    # 结果消息
+/抽奖 帮助
 ```
+显示插件的详细帮助信息和使用说明。
 
-### 装饰器添加的方法
-使用 `@lottery_algorithm` 装饰器后，抽奖类会自动获得以下方法：
+### 使用流程
 
-- `draw_prize(user_id: str) -> LotteryResult`: 执行抽奖
-- `set_prize_limit(limit: Optional[int])`: 设置奖品数量限制
-- `set_user_draw_limit(limit: Optional[int])`: 设置用户抽奖次数限制
-- `set_allow_duplicate(allow: bool)`: 设置是否允许重复中奖
-- `reset_lottery_state()`: 重置抽奖状态
-- `get_lottery_statistics()`: 获取统计信息
+1. **管理员创建抽奖**：使用 `/抽奖 创建` 命令设置抽奖活动
+2. **设置奖品详情**（可选）：使用 `/抽奖 奖品` 命令为奖品添加详细信息和图片
+3. **设置抽奖算法**（可选）：使用 `/抽奖 方式` 命令选择合适的抽奖算法
+4. **用户查看抽奖**：使用 `/抽奖 列出` 命令查看可参与的抽奖
+5. **用户参与抽奖**：使用 `/抽奖 [id]` 命令参与指定抽奖
+6. **自动开奖**：抽奖时间到期后自动进行开奖并公布结果
 
-## 扩展开发
+## 注意事项
 
-### 创建自定义算法
-```python
-from algorithm_lot import LotteryAlgorithm, register_algorithm
+- 每个用户在同一个抽奖活动中只能参与一次
+- 抽奖活动过期后将自动失效，无法再参与
+- 奖品分配采用公平的随机算法
+- 建议合理设置抽奖时间，给用户足够的参与时间
 
-@register_algorithm("custom")
-class CustomLotteryAlgorithm(LotteryAlgorithm):
-    def draw(self, user_id: str, available_prizes: List[Dict]) -> LotteryResult:
-        # 实现自定义抽奖逻辑
-        pass
-```
+## 权限说明
 
-### 使用自定义算法
-```python
-@lottery_algorithm("custom", config)
-class CustomLottery(Lottery):
-    pass
-```
+- **创建抽奖**：需要管理员权限
+- **设置奖品信息**：需要管理员权限
+- **设置抽奖算法**：需要管理员权限
+- **参与抽奖**：所有用户均可参与
+- **查看列表**：所有用户均可查看
+- **获取帮助**：所有用户均可使用
 
-## 运行示例
-
-```bash
-cd /path/to/plugin
-python example_usage.py
-```
-
-这将运行所有示例，展示各种功能的使用方法。
-
-## 支持
-
-[AstrBot 帮助文档](https://astrbot.app)
