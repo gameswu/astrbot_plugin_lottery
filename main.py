@@ -8,15 +8,35 @@ from astrbot.core.utils.session_waiter import (
 )
 
 from .lottery import Lottery, LotteryStatus, LotteryParseError, LotteryOperationError
+from .persistence import get_persistence_manager
 
 @register("lottery", "gameswu", "支持机器人设置抽奖", "0.1")
 class MyPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
+        # 初始化数据持久化管理器
+        self.persistence_manager = None
 
     async def initialize(self):
         """可选择实现异步的插件初始化方法，当实例化该插件类之后会自动调用该方法。"""
-        logger.info("Lottery plugin initialized.")
+        try:
+            # 初始化数据持久化管理器
+            # 使用插件数据目录作为存储路径
+            data_dir = self.context.get_data_dir() if hasattr(self.context, 'get_data_dir') else "data"
+            self.persistence_manager = get_persistence_manager(str(data_dir))
+            
+            # 从持久化存储中加载现有的抽奖数据
+            all_lotteries = self.persistence_manager.load_all_lotteries()
+            if all_lotteries:
+                logger.info(f"成功加载 {len(all_lotteries)} 个抽奖数据")
+            else:
+                logger.info("未找到现有抽奖数据，从空白状态开始")
+            
+            logger.info("Lottery plugin initialized successfully.")
+        except Exception as e:
+            logger.error(f"Lottery plugin initialization failed: {e}")
+            # 即使初始化失败，也创建一个默认的持久化管理器
+            self.persistence_manager = get_persistence_manager("data")
 
     @filter.command_group("lottery", alias={'抽奖'})
     async def lottery(self, event: AstrMessageEvent):
@@ -31,31 +51,31 @@ class MyPlugin(Star):
 
             # 抽奖配置模板
             template = """
-{\n
-  "name": "",\n
-  "description": "",\n
-  "start_time": "2025-01-01T00:00:00Z",\n
-  "end_time": "2025-12-31T23:59:59Z",\n
-  "allowed_groups": [],\n
-  "participation_limits": {\n
-    "max_total_participants": 1000,\n
-    "max_attempts_per_user": 3,\n
-    "max_wins_per_user": 1\n
-  },\n
-  "probability_settings": {\n
-    "probability_mode": "exhaust",\n
-    "base_probability": 0.2\n
-  },\n
-  "prizes": [\n
-    {\n
-      "name": "",\n
-      "description": "",\n
-      "image_url": "",\n
-      "weight": 1,\n
-      "quantity": 2,\n
-      "max_win_per_user": 1\n
-    }\n
-  ]\n
+{
+  "name": "",
+  "description": "",
+  "start_time": "2025-01-01T00:00:00Z",
+  "end_time": "2025-12-31T23:59:59Z",
+  "allowed_groups": [],
+  "participation_limits": {
+    "max_total_participants": 1000,
+    "max_attempts_per_user": 3,
+    "max_wins_per_user": 1
+  },
+  "probability_settings": {
+    "probability_mode": "exhaust",
+    "base_probability": 0.2
+  },
+  "prizes": [
+    {
+      "name": "",
+      "description": "",
+      "image_url": "",
+      "weight": 1,
+      "quantity": 2,
+      "max_win_per_user": 1
+    }
+  ]
 }"""
 
             yield event.plain_result(template)
@@ -66,8 +86,14 @@ class MyPlugin(Star):
                 info = event.message_str
 
                 try:
-                    Lottery.parse_and_create(info)
-                    await event.send(event.plain_result("抽奖创建成功"))
+                    lottery = Lottery.parse_and_create(info)
+                    # 使用持久化管理器保存抽奖数据
+                    if self.persistence_manager and self.persistence_manager.save_lottery(lottery):
+                        await event.send(event.plain_result(f"抽奖 '{lottery.data.name}' 创建并保存成功！"))
+                        logger.info(f"成功创建并保存抽奖: {lottery.data.name} (ID: {lottery.id})")
+                    else:
+                        await event.send(event.plain_result(f"抽奖 '{lottery.data.name}' 创建成功，但保存失败！"))
+                        logger.warning(f"抽奖创建成功但保存失败: {lottery.data.name}")
                 except LotteryParseError as e:
                     logger.error(f"抽奖信息解析失败: {e}")
                     await event.send(event.plain_result(f"抽奖信息解析失败：{str(e)}"))
@@ -91,14 +117,31 @@ class MyPlugin(Star):
     async def list_lotteries(self, event: AstrMessageEvent):
         """列出所有抽奖"""
         try:
-            lotteries = Lottery.get_all_lotteries(LotteryStatus.ACTIVE)
-            if not lotteries:
+            # 从持久化存储中获取所有抽奖
+            if not self.persistence_manager:
+                await event.send(event.plain_result("数据管理器未初始化，无法获取抽奖列表。"))
+                return
+            
+            all_lotteries = self.persistence_manager.load_all_lotteries()
+            if not all_lotteries:
+                await event.send(event.plain_result("当前没有任何抽奖。"))
+                return
+            
+            # 筛选活跃状态的抽奖
+            active_lotteries = []
+            for lottery in all_lotteries.values():
+                if lottery.get_status() == LotteryStatus.ACTIVE:
+                    active_lotteries.append(lottery)
+            
+            if not active_lotteries:
                 await event.send(event.plain_result("当前没有进行中的抽奖。"))
                 return
             
             response = "当前进行中的抽奖：\n"
-            for lottery in lotteries:
+            for lottery in active_lotteries:
                 response += f"- {lottery.data.name}：{lottery.data.description}\n"
+                response += f"  ID: {lottery.id}\n"
+                response += f"  参与人数: {lottery.total_participants}\n\n"
             
             await event.send(event.plain_result(response))
         except LotteryOperationError as e:
@@ -108,16 +151,31 @@ class MyPlugin(Star):
             logger.error(f"列出抽奖失败: {e}")
             await event.send(event.plain_result("列出抽奖失败，请稍后再试。"))
 
-    @lottery.command("lottery", alias={'抽奖'})
+    @lottery.command("participate", alias={'参与', '抽奖'})
     async def lottery_command(self, event: AstrMessageEvent, name: str):
         """抽奖命令处理"""
         try:
-            lottery = Lottery.get_lottery_by_name(name=name)
+            if not self.persistence_manager:
+                yield event.plain_result("数据管理器未初始化，无法参与抽奖。")
+                return
+            
+            # 从持久化存储中查找抽奖
+            all_lotteries = self.persistence_manager.load_all_lotteries()
+            lottery = None
+            for lot in all_lotteries.values():
+                if lot.data.name == name:
+                    lottery = lot
+                    break
+            
             if not lottery:
                 yield event.plain_result(f"未找到名为 '{name}' 的抽奖。")
                 return
             
             won, prize, message = lottery.participate(event.get_sender_id())
+            
+            # 保存更新后的抽奖数据
+            if not self.persistence_manager.save_lottery(lottery):
+                logger.warning(f"抽奖数据保存失败: {lottery.id}")
             
             # 向用户发送抽奖结果
             yield event.plain_result(message)
@@ -125,7 +183,7 @@ class MyPlugin(Star):
             # 如果中奖了，发送通知到相关群
             if won:
                 try:
-                    await self.send_notification(event, lottery_name=name, result_message=f"用户 {event.get_sender_id()} 中奖了！奖品：{prize.name if prize else '未知'}") # TODO: 修改result_message
+                    await self.send_notification(event, lottery_name=name, result_message=f"用户 {event.get_sender_id()} 中奖了！奖品：{prize.name if prize else '未知'}")
                 except Exception as e:
                     logger.error(f"发送中奖通知失败: {e}")
                     
@@ -142,8 +200,17 @@ class MyPlugin(Star):
             return
             
         try:
-            # 获取抽奖信息
-            lottery = Lottery.get_lottery_by_name(lottery_name)
+            # 从持久化存储中获取抽奖信息
+            if not self.persistence_manager:
+                return
+            
+            all_lotteries = self.persistence_manager.load_all_lotteries()
+            lottery = None
+            for lot in all_lotteries.values():
+                if lot.data.name == lottery_name:
+                    lottery = lot
+                    break
+            
             if not lottery or not lottery.data.allowed_groups:
                 return
             
