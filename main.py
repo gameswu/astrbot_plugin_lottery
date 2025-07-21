@@ -108,7 +108,7 @@ class MyPlugin(Star):
             logger.error(f"列出抽奖失败: {e}")
             await event.send(event.plain_result("列出抽奖失败，请稍后再试。"))
 
-    @filter.command("lottery", alias={'抽奖'})
+    @lottery.command("lottery", alias={'抽奖'})
     async def lottery_command(self, event: AstrMessageEvent, name: str):
         """抽奖命令处理"""
         try:
