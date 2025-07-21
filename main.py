@@ -127,6 +127,8 @@ class MyPlugin(Star):
                     await self.send_notification(event, lottery_name=name, result_message=f"用户 {event.get_sender_id()} 中奖了！奖品：{prize.name if prize else '未知'}") # TODO: 修改result_message
                 except Exception as e:
                     logger.error(f"发送中奖通知失败: {e}")
+            else:
+                yield event.plain_result("您没有中奖。")
                     
         except LotteryOperationError as e:
             logger.error(f"抽奖操作失败: {e}")
