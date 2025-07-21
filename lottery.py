@@ -54,6 +54,7 @@ class LotteryData:
     description: str
     start_time: str
     end_time: str
+    allowed_groups: List[str]
     participation_limits: ParticipationLimits
     probability_settings: ProbabilitySettings
     prizes: List[Prize]
@@ -87,6 +88,8 @@ class Lottery:
     # 类级别的存储，实际使用时可以替换为数据库
     _lotteries: Dict[str, 'Lottery'] = {}
     _lock = threading.RLock()
+    _auto_save = True  # 是否自动保存到磁盘
+    _persistence_manager = None  # 持久化管理器
     
     def __init__(self, lottery_id: str, data: LotteryData):
         self.id = lottery_id
@@ -95,6 +98,56 @@ class Lottery:
         self.total_participants = 0
         self.total_attempts = 0
         self.created_at = datetime.now(timezone.utc)
+    
+    @classmethod
+    def set_persistence_manager(cls, persistence_manager):
+        """设置持久化管理器"""
+        cls._persistence_manager = persistence_manager
+    
+    @classmethod
+    def enable_auto_save(cls, enabled: bool = True):
+        """启用或禁用自动保存"""
+        cls._auto_save = enabled
+    
+    @classmethod
+    def load_all_from_disk(cls):
+        """从磁盘加载所有抽奖数据"""
+        if cls._persistence_manager is None:
+            return
+        
+        with cls._lock:
+            loaded_lotteries = cls._persistence_manager.load_all_lotteries()
+            cls._lotteries.update(loaded_lotteries)
+    
+    def _auto_save_if_enabled(self):
+        """如果启用了自动保存，则保存到磁盘"""
+        if self._auto_save and self._persistence_manager:
+            self._persistence_manager.save_lottery(self)
+    
+    @classmethod
+    def set_persistence_manager(cls, persistence_manager):
+        """设置持久化管理器"""
+        cls._persistence_manager = persistence_manager
+    
+    @classmethod
+    def enable_auto_save(cls, enabled: bool = True):
+        """启用或禁用自动保存"""
+        cls._auto_save = enabled
+    
+    @classmethod
+    def load_all_from_disk(cls):
+        """从磁盘加载所有抽奖数据"""
+        if cls._persistence_manager is None:
+            return
+        
+        with cls._lock:
+            loaded_lotteries = cls._persistence_manager.load_all_lotteries()
+            cls._lotteries.update(loaded_lotteries)
+    
+    def _auto_save_if_enabled(self):
+        """如果启用了自动保存，则保存到磁盘"""
+        if self._auto_save and self._persistence_manager:
+            self._persistence_manager.save_lottery(self)
         
     @classmethod
     def parse_and_create(cls, json_str: str) -> 'Lottery':
@@ -116,7 +169,7 @@ class Lottery:
             
             # 验证必需字段
             required_fields = ['name', 'description', 'start_time', 'end_time', 
-                             'participation_limits', 'probability_settings', 'prizes']
+                             'allowed_groups', 'participation_limits', 'probability_settings', 'prizes']
             
             for field in required_fields:
                 if field not in raw_data:
@@ -195,6 +248,7 @@ class Lottery:
                 description=raw_data['description'],
                 start_time=raw_data['start_time'],
                 end_time=raw_data['end_time'],
+                allowed_groups=raw_data['allowed_groups'],
                 participation_limits=participation_limits,
                 probability_settings=probability_settings,
                 prizes=prizes
@@ -207,6 +261,9 @@ class Lottery:
             # 存储抽奖
             with cls._lock:
                 cls._lotteries[lottery_id] = lottery
+                
+            # 自动保存到磁盘
+            lottery._auto_save_if_enabled()
                 
             return lottery
             
@@ -271,8 +328,13 @@ class Lottery:
                 if prize.quantity > 0:  # -1表示无限量
                     prize.remaining_quantity -= 1
                 
+                # 自动保存到磁盘
+                self._auto_save_if_enabled()
+                
                 return True, prize, f"恭喜您中奖了！获得奖品：{prize.name}"
             else:
+                # 即使没中奖也要保存（因为attempts增加了）
+                self._auto_save_if_enabled()
                 return False, None, "很遗憾，这次没有中奖，请再接再厉！"
     
     def _calculate_win(self, user_id: str) -> Tuple[bool, Optional[Prize]]:
@@ -334,32 +396,42 @@ class Lottery:
             # 计算剩余中奖次数总数
             total_remaining_wins = self._calculate_remaining_wins()
             
-            print(f"剩余奖品数: {total_remaining}, 剩余中奖次数: {total_remaining_wins}")
-            
             # 如果没有剩余中奖次数，返回0
             if total_remaining_wins <= 0:
                 return 0.0
             
-            # 根据剩余奖品数量和剩余中奖次数计算所需概率
+            # 如果剩余奖品数量大于等于剩余中奖次数，应该100%中奖
+            if total_remaining >= total_remaining_wins:
+                return 1.0
+            
+            # 否则根据剩余奖品数量和剩余中奖次数计算所需概率
             needed_prob = total_remaining / total_remaining_wins
             
-            # 确保概率在合理范围内：不超过1.0，且不低于基础概率
-            needed_prob = min(1.0, needed_prob)
+            # 确保概率不低于基础概率
             return max(base_prob, needed_prob)
         
         return base_prob
     
     def _calculate_remaining_wins(self) -> int:
-        """计算剩余中奖次数总数"""
-        # 计算现有用户的剩余中奖次数
-        remaining_wins_existing_users = sum(
-            max(0, self.data.participation_limits.max_wins_per_user - len(user.wins))
-            for user in self.participants.values()
-        )
+        """计算剩余的中奖人次数（还能中奖的总次数）"""
+        # 计算现有用户的剩余中奖次数（需要考虑抽奖次数限制）
+        remaining_wins_existing_users = 0
+        for user in self.participants.values():
+            # 用户剩余的中奖次数
+            remaining_wins = max(0, self.data.participation_limits.max_wins_per_user - len(user.wins))
+            # 用户剩余的抽奖次数
+            remaining_attempts = max(0, self.data.participation_limits.max_attempts_per_user - user.attempts)
+            # 实际可能的中奖次数是两者的最小值
+            remaining_wins_existing_users += min(remaining_wins, remaining_attempts)
         
         # 计算还没参与用户的中奖次数
         users_not_participated = max(0, self.data.participation_limits.max_total_participants - self.total_participants)
-        remaining_wins_new_users = users_not_participated * self.data.participation_limits.max_wins_per_user
+        # 新用户的可能中奖次数也要考虑抽奖次数限制
+        max_wins_per_new_user = min(
+            self.data.participation_limits.max_wins_per_user,
+            self.data.participation_limits.max_attempts_per_user
+        )
+        remaining_wins_new_users = users_not_participated * max_wins_per_new_user
         
         return remaining_wins_existing_users + remaining_wins_new_users
     
@@ -464,6 +536,11 @@ class Lottery:
         with cls._lock:
             if lottery_id in cls._lotteries:
                 del cls._lotteries[lottery_id]
+                
+                # 从磁盘删除
+                if cls._persistence_manager:
+                    cls._persistence_manager.delete_lottery(lottery_id)
+                
                 return True
             return False
     
