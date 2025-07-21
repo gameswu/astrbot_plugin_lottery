@@ -66,7 +66,8 @@ class MyPlugin(Star):
                 info = event.message_str
 
                 try:
-                    lottery = Lottery.parse_and_create(info) # NOTE: 如果直接与数据库交互不需要一个对象
+                    Lottery.parse_and_create(info)
+                    await event.send(event.plain_result("抽奖创建成功"))
                 except LotteryParseError as e:
                     logger.error(f"抽奖信息解析失败: {e}")
                     await event.send(event.plain_result(f"抽奖信息解析失败：{str(e)}"))
@@ -77,7 +78,7 @@ class MyPlugin(Star):
                     controller.stop()
 
             try:
-                await handle_lottery_info(event) # TODO: 可能需要修改
+                await handle_lottery_info(event)
             except TimeoutError:
                 await event.send(event.plain_result("抽奖信息输入超时，请重新创建抽奖。"))
                 return
@@ -116,7 +117,7 @@ class MyPlugin(Star):
                 yield event.plain_result(f"未找到名为 '{name}' 的抽奖。")
                 return
             
-            won, prize, message = await lottery.participate(event.get_sender_id())
+            won, prize, message = lottery.participate(event.get_sender_id())
             
             # 向用户发送抽奖结果
             yield event.plain_result(message)
@@ -127,8 +128,6 @@ class MyPlugin(Star):
                     await self.send_notification(event, lottery_name=name, result_message=f"用户 {event.get_sender_id()} 中奖了！奖品：{prize.name if prize else '未知'}") # TODO: 修改result_message
                 except Exception as e:
                     logger.error(f"发送中奖通知失败: {e}")
-            else:
-                yield event.plain_result("您没有中奖。")
                     
         except LotteryOperationError as e:
             logger.error(f"抽奖操作失败: {e}")
