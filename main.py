@@ -138,13 +138,16 @@ class MyPlugin(Star):
                     # 如果启用创建抽奖通知，向参与群聊发布创建信息
                     if self.enable_create_notification and lottery.data.allowed_groups:
                         try:
+                            info = (
+                                "🎉 新抽奖活动 🎉\n"
+                                f"{lottery.data.name}\n"
+                                f"描述：{lottery.data.description}\n"
+                                f"活动时间：{lottery.data.start_time} ~ {lottery.data.end_time}\n"
+                                f"奖品信息：\n"
+                            )
                             # 构建富媒体消息链
                             chain = [
-                                Comp.Plain("🎉 新抽奖活动 🎉\n"),
-                                Comp.Plain(f"{lottery.data.name}\n"),
-                                Comp.Plain(f"描述：{lottery.data.description}\n"),
-                                Comp.Plain(f"活动时间：{lottery.data.start_time} ~ {lottery.data.end_time}\n"),
-                                Comp.Plain("奖品信息：\n")
+                                Comp.Plain(info)
                             ]
                             
                             # 添加奖品信息和图片
@@ -202,29 +205,21 @@ class MyPlugin(Star):
                 await event.send(MessageChain().message("当前没有进行中的抽奖。"))
                 return
             
-            chain = [Comp.Plain("当前进行中的抽奖：\n\n")]
+            info = (
+                "当前进行中的抽奖列表：\n\n"
+            )
             for lottery in active_lotteries:
                 try:
-                    chain.extend([
-                        Comp.Plain(f"- {lottery.data.name}：{lottery.data.description}\n"),
-                        Comp.Plain(f"  ID: {lottery.id}\n"),
-                        Comp.Plain(f"  参与人数: {lottery.total_participants}\n")
-                    ])
-                    
-                    # 如果抽奖有图片，添加缩略图
-                    if hasattr(lottery.data, 'image_url') and lottery.data.image_url and lottery.data.image_url.strip():
-                        try:
-                            chain.append(Comp.Image.fromURL(lottery.data.image_url))
-                        except Exception as img_e:
-                            logger.warning(f"加载抽奖缩略图失败: {lottery.data.image_url}, 错误: {img_e}")
-                            chain.append(Comp.Plain(f"  [抽奖图片: {lottery.data.image_url}]\n"))
-                    
-                    chain.append(Comp.Plain("\n"))
+                    info += (
+                        f"- {lottery.data.name}：{lottery.data.description}\n"
+                        f"  ID: {lottery.id}\n"
+                        f"  参与人数: {lottery.total_participants}\n"
+                    )
                 except Exception as lottery_e:
                     logger.error(f"处理抽奖数据时出错 {lottery.id}: {lottery_e}")
-                    chain.append(Comp.Plain(f"- [数据异常的抽奖: {lottery.id}]\n\n"))
-            
-            await event.send(MessageChain(chain))
+                    info += f"- [数据异常的抽奖: {lottery.id}]\n\n"
+
+            await event.send(MessageChain().message(info))
         except Exception as e:
             logger.error(f"列出抽奖失败: {e}")
             await event.send(MessageChain().message("列出抽奖失败，请稍后再试。"))
@@ -260,15 +255,18 @@ class MyPlugin(Star):
                 try:
                     user_id = event.get_sender_id()
                     # 构建富媒体中奖通知消息链
-                    chain = [
-                        Comp.Plain("🎊 中奖通知 🎊\n"),
-                        Comp.Plain(f"抽奖名称：{lottery.data.name}\n"),
-                        Comp.Plain(f"中奖用户：{user_id}\n"),
-                        Comp.Plain(f"获得奖品：{prize.name if prize else '未知'}\n")
-                    ]
+                    info = (
+                        "🎊 中奖通知 🎊\n"
+                        f"抽奖名称：{lottery.data.name}\n"
+                        f"中奖用户：{user_id}\n"
+                        f"获得奖品：{prize.name if prize else '未知'}\n"
+                    )
                     
                     if prize:
-                        chain.append(Comp.Plain(f"奖品描述：{prize.description}\n"))
+                        info += f"奖品描述：{prize.description}\n"
+                        chain = [
+                            Comp.Plain(info)
+                        ]
                         # 如果奖品有图片，添加图片
                         if prize.image_url and prize.image_url.strip():
                             try:
@@ -276,8 +274,6 @@ class MyPlugin(Star):
                             except Exception as img_e:
                                 logger.warning(f"加载中奖奖品图片失败: {prize.image_url}, 错误: {img_e}")
                                 chain.append(Comp.Plain(f"[奖品图片: {prize.image_url}]\n"))
-                    
-                    chain.append(Comp.Plain("恭喜中奖！🎉"))
                     
                     await self.send_notification(lottery, MessageChain(chain))
                     logger.info(f"已发送中奖通知: {user_id} 在 {lottery.data.name} 中获得 {prize.name if prize else '未知奖品'}")
@@ -337,8 +333,10 @@ class MyPlugin(Star):
                 
                 # 构建抽奖列表消息链
                 try:
-                    chain = [Comp.Plain(f"您创建的抽奖列表 (共 {len(user_lotteries)} 个)：\n\n")]
-                    
+                    info = (
+                        f"您创建的抽奖列表 (共 {len(user_lotteries)} 个)：\n\n"
+                    )
+
                     for lottery in user_lotteries:
                         try:
                             status = lottery.get_status()
@@ -348,23 +346,20 @@ class MyPlugin(Star):
                                 LotteryStatus.ENDED: "已结束",
                             }.get(status, "未知")
                             
-                            chain.extend([
-                                Comp.Plain(f"📊 {lottery.data.name}\n"),
-                                Comp.Plain(f"   状态：{status_text}\n"),
-                                Comp.Plain(f"   描述：{lottery.data.description}\n"),
-                                Comp.Plain(f"   参与人数：{lottery.total_participants}\n"),
-                                Comp.Plain(f"   抽奖次数：{lottery.total_attempts}\n"),
-                                Comp.Plain(f"   创建时间：{lottery.created_at.strftime('%Y-%m-%d %H:%M:%S')}\n"),
-                                Comp.Plain(f"   ID：{lottery.id}\n")
-                            ])
-                            
-                            chain.append(Comp.Plain("\n"))
+                            info += (
+                                f"- {lottery.data.name} (ID: {lottery.id})\n"
+                                f"  状态：{status_text}\n"
+                                f"  描述：{lottery.data.description}\n"
+                                f"  参与人数：{lottery.total_participants}\n"
+                                f"  抽奖次数：{lottery.total_attempts}\n"
+                                f"  创建时间：{lottery.created_at.strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+                            )
                         except Exception as lottery_e:
                             logger.error(f"处理抽奖数据时出错 {lottery.id}: {lottery_e}")
-                            chain.append(Comp.Plain(f"📊 [数据异常的抽奖: {lottery.id}]\n\n"))
-                    
-                    chain.append(Comp.Plain("使用 '/抽奖 信息 <抽奖名称>' 查看详细信息"))
-                    await event.send(MessageChain(chain))
+                            info += f"[数据异常的抽奖: {lottery.id}]\n\n"
+
+                    info += "使用 '/抽奖 信息 <抽奖名称>' 查看详细信息"
+                    await event.send(MessageChain().message(info))
                 except Exception as e:
                     logger.error(f"构建抽奖列表失败: {e}")
                     await event.send(MessageChain().message("构建抽奖列表时发生错误，请稍后再试。"))
@@ -397,19 +392,21 @@ class MyPlugin(Star):
                     return
                 
                 try:
-                    chain = [Comp.Plain("所有抽奖列表：\n\n")]
+                    info = (
+                        "当前所有抽奖列表：\n\n"
+                    )
                     for lottery in lotteries:
                         try:
-                            chain.extend([
-                                Comp.Plain(f"- {lottery.data.name} (ID: {lottery.id})\n"),
-                                Comp.Plain(f"  状态：{lottery.get_status().name}\n"),
-                                Comp.Plain(f"  创建者：{lottery.data.creator}\n")
-                            ])
+                            info += (
+                                f"- {lottery.data.name} (ID: {lottery.id})\n"
+                                f"  状态：{lottery.get_status().name}\n"
+                                f"  创建者：{lottery.data.creator}\n"
+                            )
                         except Exception as lottery_e:
                             logger.error(f"处理抽奖数据时出错 {lottery.id}: {lottery_e}")
-                            chain.append(Comp.Plain(f"- [数据异常的抽奖: {lottery.id}]\n"))
-                    
-                    await event.send(MessageChain(chain))
+                            info += f"- [数据异常的抽奖: {lottery.id}]\n"
+                    info += "\n"
+                    await event.send(MessageChain().message(info))
                 except Exception as e:
                     logger.error(f"构建抽奖列表失败: {e}")
                     await event.send(MessageChain().message("构建抽奖列表时发生错误，请稍后再试。"))
@@ -584,43 +581,39 @@ class MyPlugin(Star):
                 LotteryStatus.ENDED: "已结束"
             }.get(status, "未知")
             
-            chain = [
-                Comp.Plain("🎉 抽奖详细信息\n"),
-                Comp.Plain("━━━━━━━━━━━━━━━━━━━━\n"),
-                Comp.Plain(f"📊 名称：{lottery.data.name}\n"),
-                Comp.Plain(f"📝 描述：{lottery.data.description}\n"),
-                Comp.Plain(f"🔖 状态：{status_text}\n"),
-                Comp.Plain(f"🕐 开始时间：{lottery.data.start_time}\n"),
-                Comp.Plain(f"🕕 结束时间：{lottery.data.end_time}\n"),
-                Comp.Plain(f"👥 参与人数：{lottery.total_participants}\n"),
-                Comp.Plain(f"🎯 抽奖次数：{lottery.total_attempts}\n")
-            ]
-            
+            info = (
+                f"抽奖名称：{lottery.data.name}\n"
+                f"描述：{lottery.data.description}\n"
+                f"状态：{status_text}\n"
+                f"开始时间：{lottery.data.start_time}\n"
+                f"结束时间：{lottery.data.end_time}\n"
+                f"参与人数：{lottery.total_participants}\n"
+                f"抽奖次数：{lottery.total_attempts}\n"
+            )
+
             # 安全地处理创建时间
             try:
                 created_time = lottery.created_at.strftime('%Y-%m-%d %H:%M:%S')
-                chain.append(Comp.Plain(f"📅 创建时间：{created_time}\n"))
+                info += f"创建时间：{created_time}\n"
             except Exception as e:
                 logger.warning(f"格式化创建时间失败: {e}")
-                chain.append(Comp.Plain(f"📅 创建时间：{lottery.created_at}\n"))
-            
-            chain.extend([
-                Comp.Plain(f"👤 创建者：{lottery.data.creator}\n"),
-                Comp.Plain(f"🆔 抽奖ID：{lottery.id}\n\n")
-            ])
+                info += f"创建时间：{lottery.created_at}\n"
+
+            # 添加创建者信息
+            info += f"创建者：{lottery.data.creator}\n抽奖ID：{lottery.id}\n\n"
             
             # 参与限制信息
             try:
                 limits = lottery.data.participation_limits
-                chain.extend([
-                    Comp.Plain("⚙️ 参与限制：\n"),
-                    Comp.Plain(f"   👥 最大参与人数：{limits.max_total_participants if limits.max_total_participants > 0 else '无限制'}\n"),
-                    Comp.Plain(f"   🎯 每人最大抽奖次数：{limits.max_attempts_per_user if limits.max_attempts_per_user > 0 else '无限制'}\n"),
-                    Comp.Plain(f"   🏆 每人最大中奖次数：{limits.max_wins_per_user if limits.max_wins_per_user > 0 else '无限制'}\n\n")
-                ])
+                info += (
+                    f"参与限制：\n"
+                    f"   最大参与人数：{limits.max_total_participants if limits.max_total_participants > 0 else '无限制'}\n"
+                    f"   每人最大抽奖次数：{limits.max_attempts_per_user if limits.max_attempts_per_user > 0 else '无限制'}\n"
+                    f"   每人最大中奖次数：{limits.max_wins_per_user if limits.max_wins_per_user > 0 else '无限制'}\n\n"
+                )
             except Exception as e:
                 logger.warning(f"处理参与限制信息时出错: {e}")
-                chain.append(Comp.Plain("⚙️ 参与限制：[数据异常]\n\n"))
+                info += "⚙️ 参与限制：[数据异常]\n\n"
             
             # 概率设置信息
             try:
@@ -630,67 +623,65 @@ class MyPlugin(Star):
                     "dynamic": "动态概率",
                     "exhaust": "抽完即止"
                 }.get(prob.probability_mode, "未知")
-                chain.extend([
-                    Comp.Plain("🎲 概率设置：\n"),
-                    Comp.Plain(f"   📊 模式：{mode_text}\n"),
-                    Comp.Plain(f"   🎯 基础概率：{prob.base_probability:.2%}\n\n")
-                ])
+                info += (
+                    f"概率设置：\n"
+                    f"   模式：{mode_text}\n"
+                    f"   基础概率：{prob.base_probability:.2%}\n\n"
+                )
             except Exception as e:
                 logger.warning(f"处理概率设置信息时出错: {e}")
-                chain.append(Comp.Plain("🎲 概率设置：[数据异常]\n\n"))
-            
+                info += "概率设置：[数据异常]\n\n"
+
             # 奖品信息
             try:
-                chain.append(Comp.Plain(f"🏆 奖品列表 (共 {len(lottery.data.prizes)} 个)：\n"))
+                info += f"奖品列表 (共 {len(lottery.data.prizes)} 个)：\n"
+                chain = [
+                    Comp.Plain(info)
+                ]
                 for i, prize in enumerate(lottery.data.prizes, 1):
                     try:
                         remaining = prize.remaining_quantity if prize.remaining_quantity is not None else prize.quantity
                         total = prize.quantity if prize.quantity > 0 else "无限"
-                        chain.extend([
-                            Comp.Plain(f"   {i}. {prize.name}\n"),
-                            Comp.Plain(f"      📝 描述：{prize.description}\n"),
-                            Comp.Plain(f"      ⚖️ 权重：{prize.weight}\n"),
-                            Comp.Plain(f"      📊 剩余/总数：{remaining}/{total}\n"),
-                            Comp.Plain(f"      👤 每人限制：{prize.max_win_per_user}\n")
-                        ])
-                        
+                        prize_info += (
+                            f"   {i}. {prize.name}\n"
+                            f"      描述：{prize.description}\n"
+                            f"      权重：{prize.weight}\n"
+                            f"      剩余/总数：{remaining}/{total}\n"
+                            f"      每人限制：{prize.max_win_per_user}\n"
+                        )
+                        chain.append(Comp.Plain(prize_info))
+
                         # 如果奖品有图片，添加图片
                         if prize.image_url and prize.image_url.strip():
                             try:
                                 chain.append(Comp.Image.fromURL(prize.image_url))
                             except Exception as img_e:
                                 logger.warning(f"加载奖品图片失败: {prize.image_url}, 错误: {img_e}")
-                                chain.append(Comp.Plain(f"      🖼️ [奖品图片: {prize.image_url}]\n"))
-                        
+                                chain.append(Comp.Plain(f"      [奖品图片: {prize.image_url}]\n"))
                         chain.append(Comp.Plain("\n"))
                     except Exception as prize_e:
                         logger.error(f"处理奖品 {i} 信息时出错: {prize_e}")
                         chain.append(Comp.Plain(f"   {i}. [奖品数据异常]\n\n"))
             except Exception as e:
                 logger.warning(f"处理奖品列表时出错: {e}")
-                chain.append(Comp.Plain("🏆 奖品列表：[数据异常]\n\n"))
+                chain.append(Comp.Plain("奖品列表：[数据异常]\n\n"))
             
             # 允许的群聊
             try:
                 if lottery.data.allowed_groups:
-                    chain.append(Comp.Plain(f"📢 允许的群聊：{', '.join(lottery.data.allowed_groups)}\n"))
+                    chain.append(Comp.Plain(f"允许的群聊：{', '.join(lottery.data.allowed_groups)}\n"))
                 else:
-                    chain.append(Comp.Plain("📢 允许的群聊：未设置\n"))
+                    chain.append(Comp.Plain("允许的群聊：未设置\n"))
             except Exception as e:
                 logger.warning(f"处理群聊列表时出错: {e}")
-                chain.append(Comp.Plain("📢 允许的群聊：[数据异常]\n"))
-            
+                chain.append(Comp.Plain("允许的群聊：[数据异常]\n"))
+
             return chain
             
         except Exception as e:
             logger.error(f"构建抽奖详细信息失败: {e}")
             # 返回错误信息
-            return [
-                Comp.Plain("❌ 抽奖详细信息\n"),
-                Comp.Plain("━━━━━━━━━━━━━━━━━━━━\n"),
-                Comp.Plain("构建详细信息时发生错误，请稍后再试。\n"),
-                Comp.Plain(f"抽奖ID：{lottery.id if lottery else 'Unknown'}\n")
-            ]
+            return Comp.Plain(f"构建抽奖详细信息时发生错误: {str(e)}\n请稍后再试。")
 
     async def terminate(self):
         """可选择实现异步的插件销毁方法，当插件被卸载/停用时会调用。"""
