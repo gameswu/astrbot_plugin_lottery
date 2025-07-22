@@ -3,4 +3,3 @@ desc: 支持机器人设置抽奖 # 插件简短描述
 version: v0.1 # 插件版本号。格式：v1.1.1 或者 v1.1
 author: gameswu # 作者
 repo: https://github.com/gameswu/astrbot_plugin_lottery # 插件的仓库地址
-`
