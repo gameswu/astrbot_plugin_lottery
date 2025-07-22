@@ -13,8 +13,6 @@ class LotteryStatus(Enum):
     PENDING = "pending"      # 未开始
     ACTIVE = "active"        # 进行中
     ENDED = "ended"          # 已结束
-    CANCELLED = "cancelled"  # 已取消
-
 
 @dataclass
 class Prize:
@@ -560,6 +558,62 @@ class Lottery:
                 
                 return True
             return False
+    
+    def cancel_lottery(self) -> bool:
+        """
+        取消抽奖（立即结束）
+        
+        将抽奖的结束时间设置为当前时间，使其立即结束
+        
+        Returns:
+            bool: 操作是否成功
+            
+        Raises:
+            LotteryOperationError: 如果抽奖已经结束则抛出错误
+        """
+        with self._lock:
+            status = self.get_status()
+            
+            # 如果抽奖已经结束，不能取消
+            if status == LotteryStatus.ENDED:
+                raise LotteryOperationError("抽奖已经结束，无法取消")
+            
+            # 将结束时间设置为当前时间
+            now = datetime.now(timezone.utc)
+            self.data.end_time = now.isoformat().replace('+00:00', 'Z')
+            
+            # 自动保存到磁盘
+            self._auto_save_if_enabled()
+            
+            return True
+    
+    def start_lottery(self) -> bool:
+        """
+        立即开始抽奖
+        
+        将抽奖的开始时间设置为当前时间，使其立即开始
+        
+        Returns:
+            bool: 操作是否成功
+            
+        Raises:
+            LotteryOperationError: 如果抽奖已经开始或结束则抛出错误
+        """
+        with self._lock:
+            status = self.get_status()
+            
+            # 如果抽奖已经开始或结束，不能强制开始
+            if status != LotteryStatus.PENDING:
+                raise LotteryOperationError(f"抽奖当前状态为 {status.value}，无法强制开始")
+            
+            # 将开始时间设置为当前时间
+            now = datetime.now(timezone.utc)
+            self.data.start_time = now.isoformat().replace('+00:00', 'Z')
+            
+            # 自动保存到磁盘
+            self._auto_save_if_enabled()
+            
+            return True
     
     def get_user_participation(self, user_id: str) -> Optional[UserParticipation]:
         """获取用户参与信息"""

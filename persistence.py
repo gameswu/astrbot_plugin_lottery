@@ -6,7 +6,7 @@ from dataclasses import asdict
 import threading
 from pathlib import Path
 
-from .lottery import Lottery, LotteryData, Prize, ParticipationLimits, ProbabilitySettings, UserParticipation
+from lottery import Lottery, LotteryData, Prize, ParticipationLimits, ProbabilitySettings, UserParticipation
 
 
 class LotteryPersistence:

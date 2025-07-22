@@ -115,6 +115,63 @@ user_active_lotteries = Lottery.get_all_lotteries(
 )
 ```
 
+### 5. 抽奖生命周期管理
+
+#### 立即开始抽奖
+
+```python
+from lottery import LotteryOperationError
+
+try:
+    # 立即开始一个待开始的抽奖
+    success = lottery.start_lottery()
+    if success:
+        print("抽奖已立即开始")
+except LotteryOperationError as e:
+    print(f"立即开始失败: {e}")
+```
+
+#### 取消抽奖
+
+```python
+from lottery import LotteryOperationError
+
+try:
+    # 取消正在进行的抽奖，将其立即结束
+    success = lottery.cancel_lottery()
+    if success:
+        print("抽奖已成功取消（立即结束）")
+except LotteryOperationError as e:
+    print(f"取消抽奖失败: {e}")
+```
+
+#### 删除抽奖
+
+```python
+# 根据抽奖ID删除抽奖
+lottery_id = "your_lottery_id"
+success = Lottery.delete_lottery(lottery_id)
+
+if success:
+    print(f"抽奖 {lottery_id} 已成功删除")
+else:
+    print(f"删除失败：未找到抽奖 {lottery_id}")
+```
+
+### 6. 用户参与信息查询
+
+```python
+# 获取指定用户的参与情况
+user_participation = lottery.get_user_participation("user_123")
+
+if user_participation:
+    print(f"用户ID: {user_participation.user_id}")
+    print(f"参与次数: {user_participation.attempts}")
+    print(f"中奖记录: {user_participation.wins}")
+else:
+    print("用户未参与此抽奖")
+```
+
 ## 配置参数说明
 
 ### 基本信息
@@ -153,10 +210,14 @@ user_active_lotteries = Lottery.get_all_lotteries(
 
 ## 抽奖状态
 
-- `PENDING`: 未开始
-- `ACTIVE`: 进行中
-- `ENDED`: 已结束
-- `CANCELLED`: 已取消
+- `PENDING`: 未开始 - 当前时间早于开始时间
+- `ACTIVE`: 进行中 - 当前时间在开始时间和结束时间之间  
+- `ENDED`: 已结束 - 当前时间晚于结束时间，或被管理员手动取消
+
+**状态转换：**
+- `PENDING` → `ACTIVE`：当到达开始时间时自动转换
+- `ACTIVE` → `ENDED`：当到达结束时间或被管理员取消时转换
+- `ENDED` 状态无法逆转
 
 ## 概率计算
 

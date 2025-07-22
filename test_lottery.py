@@ -257,6 +257,142 @@ def test_limits():
     print("✅ 限制功能测试通过")
 
 
+def test_cancel_functionality():
+    """测试取消功能"""
+    print("🚫 测试取消功能...")
+    
+    # 确保没有持久化管理器干扰测试
+    Lottery.set_persistence_manager(None)
+    Lottery.enable_auto_save(False)
+    Lottery._lotteries.clear()
+    
+    # 创建一个正在进行的抽奖
+    config = get_test_lottery_config()
+    config["name"] = "取消测试抽奖"
+    lottery = Lottery.parse_and_create(json.dumps(config))
+    
+    # 验证初始状态
+    assert lottery.get_status() == LotteryStatus.ACTIVE, "抽奖应该处于活跃状态"
+    
+    # 用户参与抽奖
+    won, prize, message = lottery.participate("user1")
+    assert isinstance(won, bool), "参与结果类型错误"
+    
+    # 取消抽奖
+    result = lottery.cancel_lottery()
+    assert result == True, "取消抽奖应该成功"
+    
+    # 验证抽奖状态变为已结束
+    assert lottery.get_status() == LotteryStatus.ENDED, "取消后抽奖状态应该为已结束"
+    
+    # 尝试在取消后参与抽奖，应该失败
+    try:
+        lottery.participate("user2")
+        assert False, "取消后应该无法参与抽奖"
+    except LotteryOperationError:
+        pass
+    
+    # 测试重复取消，应该失败
+    try:
+        lottery.cancel_lottery()
+        assert False, "已结束的抽奖不应该能再次取消"
+    except LotteryOperationError:
+        pass
+    
+    # 测试已结束抽奖的取消
+    past_config = get_test_lottery_config()
+    past_config["name"] = "已结束抽奖"
+    past_time_start = (datetime.now(timezone.utc) - timedelta(hours=3)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    past_time_end = (datetime.now(timezone.utc) - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    past_config["start_time"] = past_time_start
+    past_config["end_time"] = past_time_end
+    ended_lottery = Lottery.parse_and_create(json.dumps(past_config))
+    
+    try:
+        ended_lottery.cancel_lottery()
+        assert False, "已结束的抽奖不应该能被取消"
+    except LotteryOperationError:
+        pass
+    
+    print("✅ 取消功能测试通过")
+
+
+def test_start_functionality():
+    """测试立即开始功能"""
+    print("🚀 测试立即开始功能...")
+    
+    # 确保没有持久化管理器干扰测试
+    Lottery.set_persistence_manager(None)
+    Lottery.enable_auto_save(False)
+    Lottery._lotteries.clear()
+    
+    # 创建一个未开始的抽奖（开始时间在未来）
+    config = get_test_lottery_config()
+    config["name"] = "立即开始测试抽奖"
+    future_time_start = (datetime.now(timezone.utc) + timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    future_time_end = (datetime.now(timezone.utc) + timedelta(hours=3)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    config["start_time"] = future_time_start
+    config["end_time"] = future_time_end
+    lottery = Lottery.parse_and_create(json.dumps(config))
+    
+    # 验证初始状态
+    assert lottery.get_status() == LotteryStatus.PENDING, "抽奖应该处于待开始状态"
+    
+    # 尝试在未开始时参与抽奖，应该失败
+    try:
+        lottery.participate("user1")
+        assert False, "未开始的抽奖不应该能参与"
+    except LotteryOperationError:
+        pass
+    
+    # 立即开始抽奖
+    result = lottery.start_lottery()
+    assert result == True, "立即开始抽奖应该成功"
+    
+    # 验证抽奖状态变为活跃
+    assert lottery.get_status() == LotteryStatus.ACTIVE, "立即开始后抽奖状态应该为活跃"
+    
+    # 尝试在开始后参与抽奖，应该成功
+    won, prize, message = lottery.participate("user1")
+    assert isinstance(won, bool), "参与结果类型错误"
+    assert isinstance(message, str), "消息类型错误"
+    
+    # 测试重复开始，应该失败
+    try:
+        lottery.start_lottery()
+        assert False, "已开始的抽奖不应该能再次开始"
+    except LotteryOperationError:
+        pass
+    
+    # 测试已结束抽奖的开始
+    past_config = get_test_lottery_config()
+    past_config["name"] = "已结束抽奖"
+    past_time_start = (datetime.now(timezone.utc) - timedelta(hours=3)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    past_time_end = (datetime.now(timezone.utc) - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    past_config["start_time"] = past_time_start
+    past_config["end_time"] = past_time_end
+    ended_lottery = Lottery.parse_and_create(json.dumps(past_config))
+    
+    try:
+        ended_lottery.start_lottery()
+        assert False, "已结束的抽奖不应该能被立即开始"
+    except LotteryOperationError:
+        pass
+    
+    # 测试已活跃抽奖的开始
+    active_config = get_test_lottery_config()
+    active_config["name"] = "已活跃抽奖"
+    active_lottery = Lottery.parse_and_create(json.dumps(active_config))
+    
+    try:
+        active_lottery.start_lottery()
+        assert False, "已活跃的抽奖不应该能被立即开始"
+    except LotteryOperationError:
+        pass
+    
+    print("✅ 立即开始功能测试通过")
+
+
 def test_system_crash_recovery():
     """测试系统崩溃恢复场景 - 重点测试exhaust模式"""
     print("💥 测试系统崩溃恢复场景...")
@@ -610,6 +746,8 @@ def run_all_tests():
         test_probability_modes()
         test_error_handling()
         test_limits()
+        test_cancel_functionality()  # 新增的取消功能测试
+        test_start_functionality()   # 新增的立即开始功能测试
         test_system_crash_recovery()  # 新增的崩溃恢复测试
         
         print("=" * 50)
