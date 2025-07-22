@@ -374,9 +374,6 @@ class MyPlugin(Star):
         """管理员管理抽奖"""
         try:
             user_id = event.get_sender_id()
-            if not self.context.is_admin(user_id):
-                await event.send(MessageChain().message("您没有权限执行此操作。"))
-                return
             
             if operator == "list":
                 # 列出所有抽奖
