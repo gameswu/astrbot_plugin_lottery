@@ -58,6 +58,7 @@ class LotteryData:
     participation_limits: ParticipationLimits
     probability_settings: ProbabilitySettings
     prizes: List[Prize]
+    creator: str = ""  # 创建者字段，默认为空字符串
 
 
 @dataclass
@@ -91,9 +92,12 @@ class Lottery:
     _auto_save = True  # 是否自动保存到磁盘
     _persistence_manager = None  # 持久化管理器
     
-    def __init__(self, lottery_id: str, data: LotteryData):
+    def __init__(self, lottery_id: str, data: LotteryData, creator: str = ""):
         self.id = lottery_id
         self.data = data
+        # 设置创建者
+        if creator:
+            self.data.creator = creator
         self.participants: Dict[str, UserParticipation] = {}
         self.total_participants = 0
         self.total_attempts = 0
@@ -150,12 +154,13 @@ class Lottery:
             self._persistence_manager.save_lottery(self)
         
     @classmethod
-    def parse_and_create(cls, json_str: str) -> 'Lottery':
+    def parse_and_create(cls, json_str: str, creator: str = "") -> 'Lottery':
         """
         从JSON字符串解析并创建抽奖
         
         Args:
             json_str: 抽奖配置的JSON字符串
+            creator: 创建者标识（可选）
             
         Returns:
             Lottery: 创建的抽奖实例
@@ -256,7 +261,7 @@ class Lottery:
             
             # 生成唯一ID并创建抽奖
             lottery_id = str(uuid.uuid4())
-            lottery = cls(lottery_id, lottery_data)
+            lottery = cls(lottery_id, lottery_data, creator)
             
             # 存储抽奖
             with cls._lock:
@@ -518,13 +523,25 @@ class Lottery:
             return None
     
     @classmethod
-    def get_all_lotteries(cls, status_filter: Optional[LotteryStatus] = None) -> List['Lottery']:
-        """获取所有抽奖"""
+    def get_all_lotteries(cls, status_filter: Optional[LotteryStatus] = None, creator_filter: Optional[str] = None) -> List['Lottery']:
+        """
+        获取所有抽奖
+        
+        Args:
+            status_filter: 可选的状态过滤器，只返回指定状态的抽奖
+            creator_filter: 可选的创建者过滤器，只返回指定创建者的抽奖
+            
+        Returns:
+            List['Lottery']: 符合条件的抽奖列表，按创建时间倒序排列
+        """
         with cls._lock:
             lotteries = list(cls._lotteries.values())
             
             if status_filter:
                 lotteries = [lottery for lottery in lotteries if lottery.get_status() == status_filter]
+            
+            if creator_filter:
+                lotteries = [lottery for lottery in lotteries if lottery.data.creator == creator_filter]
             
             # 按创建时间排序
             lotteries.sort(key=lambda x: x.created_at, reverse=True)

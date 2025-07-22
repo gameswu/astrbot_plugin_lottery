@@ -49,7 +49,7 @@ lottery_config = '''
 '''
 
 try:
-    lottery = Lottery.parse_and_create(lottery_config)
+    lottery = Lottery.parse_and_create(lottery_config, creator="admin_user")
     print(f"抽奖创建成功！ID: {lottery.id}")
 except LotteryParseError as e:
     print(f"创建失败: {e}")
@@ -104,6 +104,15 @@ all_lotteries = Lottery.get_all_lotteries()
 # 获取指定状态的抽奖
 from lottery import LotteryStatus
 active_lotteries = Lottery.get_all_lotteries(LotteryStatus.ACTIVE)
+
+# 获取指定创建者的抽奖
+user_lotteries = Lottery.get_all_lotteries(creator_filter="admin_user")
+
+# 同时使用多个过滤器
+user_active_lotteries = Lottery.get_all_lotteries(
+    status_filter=LotteryStatus.ACTIVE, 
+    creator_filter="admin_user"
+)
 ```
 
 ## 配置参数说明
