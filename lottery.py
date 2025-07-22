@@ -530,7 +530,7 @@ class Lottery:
             creator_filter: 可选的创建者过滤器，只返回指定创建者的抽奖
             
         Returns:
-            List['Lottery']: 符合条件的抽奖列表，按创建时间倒序排列
+            List['Lottery']: 符合条件的抽奖列表，按状态和时间排序
         """
         with cls._lock:
             lotteries = list(cls._lotteries.values())
@@ -541,8 +541,24 @@ class Lottery:
             if creator_filter:
                 lotteries = [lottery for lottery in lotteries if lottery.data.creator == creator_filter]
             
-            # 按创建时间排序
-            lotteries.sort(key=lambda x: x.created_at, reverse=True)
+            # 自定义排序逻辑
+            def sort_key(lottery):
+                status = lottery.get_status()
+                start_time = datetime.fromisoformat(lottery.data.start_time.replace('Z', '+00:00'))
+                end_time = datetime.fromisoformat(lottery.data.end_time.replace('Z', '+00:00'))
+                
+                # 状态优先级：进行中(1) > 未开始(2) > 已结束(3)
+                if status == LotteryStatus.ACTIVE:
+                    # 进行中的按开始时间倒序（最近开始的在前）
+                    return (1, -start_time.timestamp())
+                elif status == LotteryStatus.PENDING:
+                    # 未开始的按开始时间倒序（最近开始的在前）
+                    return (2, -start_time.timestamp())
+                else:  # ENDED
+                    # 已结束的按结束时间倒序（最近结束的在前）
+                    return (3, -end_time.timestamp())
+            
+            lotteries.sort(key=sort_key)
             return lotteries
     
     @classmethod
