@@ -7,6 +7,8 @@ from enum import Enum
 import random
 import threading
 
+from astrbot.api import logger
+
 
 class LotteryStatus(Enum):
     """抽奖状态枚举"""
@@ -123,8 +125,12 @@ class Lottery:
     
     def _auto_save_if_enabled(self):
         """如果启用了自动保存，则保存到磁盘"""
-        if self._auto_save and self._persistence_manager:
-            self._persistence_manager.save_lottery(self)
+        try:
+            if self._auto_save and self._persistence_manager:
+                self._persistence_manager.save_lottery(self)
+        except Exception as e:
+            logger.error(f"自动保存抽奖数据时失败: {e}")
+            # 不重新抛出异常，因为保存失败不应该影响业务逻辑
     
     @classmethod
     def set_persistence_manager(cls, persistence_manager):
@@ -148,8 +154,12 @@ class Lottery:
     
     def _auto_save_if_enabled(self):
         """如果启用了自动保存，则保存到磁盘"""
-        if self._auto_save and self._persistence_manager:
-            self._persistence_manager.save_lottery(self)
+        try:
+            if self._auto_save and self._persistence_manager:
+                self._persistence_manager.save_lottery(self)
+        except Exception as e:
+            logger.error(f"自动保存抽奖数据时失败: {e}")
+            # 不重新抛出异常，因为保存失败不应该影响业务逻辑
         
     @classmethod
     def parse_and_create(cls, json_str: str, creator: str = "") -> 'Lottery':
@@ -290,102 +300,149 @@ class Lottery:
         Raises:
             LotteryOperationError: 操作错误时抛出
         """
-        with self._lock:
-            # 检查抽奖状态
-            status = self.get_status()
-            if status != LotteryStatus.ACTIVE:
-                raise LotteryOperationError(f"抽奖当前状态为 {status.value}，无法参与")
-            
-            # 获取或创建用户参与记录
-            if user_id not in self.participants:
-                self.participants[user_id] = UserParticipation(user_id)
-                self.total_participants += 1
-            
-            user_participation = self.participants[user_id]
-            
-            # 检查参与限制
-            limits = self.data.participation_limits
-            
-            # 检查总参与人数限制
-            if limits.max_total_participants > 0 and self.total_participants > limits.max_total_participants:
-                raise LotteryOperationError("参与人数已达上限")
-            
-            # 检查用户抽奖次数限制
-            if user_participation.attempts >= limits.max_attempts_per_user:
-                raise LotteryOperationError(f"您的抽奖次数已达上限（{limits.max_attempts_per_user}次）")
-            
-            # 检查用户中奖次数限制
-            if limits.max_wins_per_user > 0 and len(user_participation.wins) >= limits.max_wins_per_user:
-                raise LotteryOperationError(f"您的中奖次数已达上限（{limits.max_wins_per_user}次）")
-            
-            # 增加抽奖次数
-            user_participation.attempts += 1
-            self.total_attempts += 1
-            
-            # 计算是否中奖
-            won, prize = self._calculate_win(user_id)
-            
-            if won and prize:
-                # 处理中奖
-                user_participation.wins.append(prize.name)
-                if prize.quantity > 0:  # -1表示无限量
-                    prize.remaining_quantity -= 1
+        # 输入验证
+        if not user_id or not isinstance(user_id, str):
+            raise LotteryOperationError("用户ID不能为空且必须是字符串")
+        
+        user_id = user_id.strip()
+        if not user_id:
+            raise LotteryOperationError("用户ID不能为空白字符")
+        
+        try:
+            with self._lock:
+                # 检查抽奖状态
+                status = self.get_status()
+                if status != LotteryStatus.ACTIVE:
+                    raise LotteryOperationError(f"抽奖当前状态为 {status.value}，无法参与")
                 
-                # 自动保存到磁盘
-                self._auto_save_if_enabled()
+                # 获取或创建用户参与记录
+                if user_id not in self.participants:
+                    self.participants[user_id] = UserParticipation(user_id)
+                    self.total_participants += 1
                 
-                return True, prize, f"恭喜您中奖了！获得奖品：{prize.name}"
-            else:
-                # 即使没中奖也要保存（因为attempts增加了）
-                self._auto_save_if_enabled()
-                return False, None, "很遗憾，这次没有中奖，请再接再厉！"
+                user_participation = self.participants[user_id]
+                
+                # 检查参与限制
+                limits = self.data.participation_limits
+                
+                # 检查总参与人数限制
+                if limits.max_total_participants > 0 and self.total_participants > limits.max_total_participants:
+                    raise LotteryOperationError("参与人数已达上限")
+                
+                # 检查用户抽奖次数限制
+                if user_participation.attempts >= limits.max_attempts_per_user:
+                    raise LotteryOperationError(f"您的抽奖次数已达上限（{limits.max_attempts_per_user}次）")
+                
+                # 检查用户中奖次数限制
+                if limits.max_wins_per_user > 0 and len(user_participation.wins) >= limits.max_wins_per_user:
+                    raise LotteryOperationError(f"您的中奖次数已达上限（{limits.max_wins_per_user}次）")
+                
+                # 增加抽奖次数
+                user_participation.attempts += 1
+                self.total_attempts += 1
+                
+                # 计算是否中奖
+                try:
+                    won, prize = self._calculate_win(user_id)
+                except Exception as e:
+                    # 如果计算中奖失败，回滚抽奖次数
+                    user_participation.attempts -= 1
+                    self.total_attempts -= 1
+                    raise LotteryOperationError(f"计算中奖结果时发生错误: {e}")
+                
+                if won and prize:
+                    # 处理中奖
+                    user_participation.wins.append(prize.name)
+                    if prize.quantity > 0:  # -1表示无限量
+                        prize.remaining_quantity -= 1
+                    
+                    # 自动保存到磁盘
+                    try:
+                        self._auto_save_if_enabled()
+                    except Exception as e:
+                        logger.warning(f"保存中奖数据失败: {e}")
+                        # 不让保存失败影响中奖结果
+                    
+                    return True, prize, f"恭喜您中奖了！获得奖品：{prize.name}"
+                else:
+                    # 即使没中奖也要保存（因为attempts增加了）
+                    try:
+                        self._auto_save_if_enabled()
+                    except Exception as e:
+                        logger.warning(f"保存参与数据失败: {e}")
+                        # 不让保存失败影响参与结果
+                    
+                    return False, None, "很遗憾，这次没有中奖，请再接再厉！"
+        except LotteryOperationError:
+            # 重新抛出业务逻辑错误
+            raise
+        except Exception as e:
+            raise LotteryOperationError(f"参与抽奖时发生错误: {e}")
     
     def _calculate_win(self, user_id: str) -> Tuple[bool, Optional[Prize]]:
         """计算用户是否中奖及中奖奖品"""
-        # 计算中奖概率
-        if self.data.probability_settings.probability_mode == 'fixed':
-            win_probability = self.data.probability_settings.base_probability
-        else:
-            win_probability = self._calculate_dynamic_probability()
-        
-        # 判断是否中奖
-        if random.random() > win_probability:
-            return False, None
-        
-        # 获取可中奖的奖品
-        available_prizes = self._get_available_prizes(user_id)
-        if not available_prizes:
-            return False, None
-        
-        # 根据权重选择奖品
-        total_weight = sum(prize.weight for prize in available_prizes)
-        if total_weight == 0:
-            return False, None
+        try:
+            # 计算中奖概率
+            if self.data.probability_settings.probability_mode == 'fixed':
+                win_probability = self.data.probability_settings.base_probability
+            else:
+                win_probability = self._calculate_dynamic_probability()
             
-        rand_value = random.randint(1, total_weight)
-        current_weight = 0
-        
-        for prize in available_prizes:
-            current_weight += prize.weight
-            if rand_value <= current_weight:
-                return True, prize
-        
-        return False, None
+            # 判断是否中奖
+            if random.random() > win_probability:
+                return False, None
+            
+            # 获取可中奖的奖品
+            available_prizes = self._get_available_prizes(user_id)
+            if not available_prizes:
+                return False, None
+            
+            # 根据权重选择奖品
+            total_weight = sum(prize.weight for prize in available_prizes)
+            if total_weight == 0:
+                return False, None
+                
+            rand_value = random.randint(1, total_weight)
+            current_weight = 0
+            
+            for prize in available_prizes:
+                current_weight += prize.weight
+                if rand_value <= current_weight:
+                    return True, prize
+            
+            return False, None
+        except Exception as e:
+            logger.error(f"计算中奖结果时发生错误: {e}")
+            raise
     
     def _calculate_dynamic_probability(self) -> float:
         """计算动态概率"""
-        base_prob = self.data.probability_settings.base_probability
-        
-        # 如果是 fixed 模式，直接返回基础概率
-        if self.data.probability_settings.probability_mode == 'fixed':
+        try:
+            base_prob = self.data.probability_settings.base_probability
+            
+            # 如果是 fixed 模式，直接返回基础概率
+            if self.data.probability_settings.probability_mode == 'fixed':
+                return base_prob
+            
+            # 如果是 dynamic 模式，返回稍微调整的概率（这里可以根据需要添加其他逻辑）
+            if self.data.probability_settings.probability_mode == 'dynamic':
+                return base_prob
+            
+            # 如果是 exhaust 模式，需要计算动态概率以尽量消耗完奖品
+            if self.data.probability_settings.probability_mode == 'exhaust':
+                return self._calculate_exhaust_probability()
+            
+            # 默认返回基础概率
             return base_prob
+        except Exception as e:
+            logger.error(f"计算动态概率时发生错误: {e}")
+            # 发生错误时返回基础概率作为fallback
+            return self.data.probability_settings.base_probability
         
-        # 如果是 dynamic 模式，返回稍微调整的概率（这里可以根据需要添加其他逻辑）
-        if self.data.probability_settings.probability_mode == 'dynamic':
-            return base_prob
-        
-        # 如果是 exhaust 模式，需要计算动态概率以尽量消耗完奖品
-        if self.data.probability_settings.probability_mode == 'exhaust':
+    def _calculate_exhaust_probability(self) -> float:
+        """计算 exhaust 模式下的动态概率"""
+        try:
+            base_prob = self.data.probability_settings.base_probability
             # 计算剩余奖品总数
             total_remaining = sum(
                 prize.remaining_quantity if prize.quantity > 0 else 0  # 无限量奖品不参与动态调整
@@ -412,8 +469,10 @@ class Lottery:
             
             # 确保概率不低于基础概率
             return max(base_prob, needed_prob)
-        
-        return base_prob
+        except Exception as e:
+            logger.error(f"计算 exhaust 模式下的动态概率时发生错误: {e}")
+            # 发生错误时返回基础概率作为fallback
+            return self.data.probability_settings.base_probability
     
     def _calculate_remaining_wins(self) -> int:
         """计算剩余的中奖人次数（还能中奖的总次数）"""
@@ -440,38 +499,55 @@ class Lottery:
     
     def _get_available_prizes(self, user_id: str) -> List[Prize]:
         """获取用户可中奖的奖品列表"""
-        user_participation = self.participants.get(user_id)
-        if not user_participation:
-            return []
-        
-        available_prizes = []
-        
-        for prize in self.data.prizes:
-            # 检查奖品是否还有库存
-            if prize.quantity > 0 and prize.remaining_quantity <= 0:
-                continue
+        try:
+            user_participation = self.participants.get(user_id)
+            if not user_participation:
+                return []
             
-            # 检查用户是否已达该奖品的获得上限
-            user_wins_count = user_participation.wins.count(prize.name)
-            if user_wins_count >= prize.max_win_per_user:
-                continue
-                
-            available_prizes.append(prize)
-        
-        return available_prizes
+            available_prizes = []
+            
+            for prize in self.data.prizes:
+                try:
+                    # 检查奖品是否还有库存
+                    if prize.quantity > 0 and prize.remaining_quantity <= 0:
+                        continue
+                    
+                    # 检查用户是否已达该奖品的获得上限
+                    user_wins_count = user_participation.wins.count(prize.name)
+                    if user_wins_count >= prize.max_win_per_user:
+                        continue
+                        
+                    available_prizes.append(prize)
+                except Exception as e:
+                    logger.warning(f"检查奖品 {prize.name} 可用性时发生错误: {e}")
+                    # 跳过有问题的奖品，继续处理其他奖品
+                    continue
+            
+            return available_prizes
+        except Exception as e:
+            logger.error(f"获取可用奖品列表时发生错误: {e}")
+            return []  # 发生错误时返回空列表
     
     def get_status(self) -> LotteryStatus:
         """获取抽奖状态"""
-        now = datetime.now(timezone.utc)
-        start_time = datetime.fromisoformat(self.data.start_time.replace('Z', '+00:00'))
-        end_time = datetime.fromisoformat(self.data.end_time.replace('Z', '+00:00'))
-        
-        if now < start_time:
-            return LotteryStatus.PENDING
-        elif now > end_time:
+        try:
+            now = datetime.now(timezone.utc)
+            start_time = datetime.fromisoformat(self.data.start_time.replace('Z', '+00:00'))
+            end_time = datetime.fromisoformat(self.data.end_time.replace('Z', '+00:00'))
+            
+            if now < start_time:
+                return LotteryStatus.PENDING
+            elif now > end_time:
+                return LotteryStatus.ENDED
+            else:
+                return LotteryStatus.ACTIVE
+        except ValueError as e:
+            logger.error(f"解析抽奖时间时发生错误: {e}")
+            # 时间解析失败时，默认返回ENDED状态以防止参与
             return LotteryStatus.ENDED
-        else:
-            return LotteryStatus.ACTIVE
+        except Exception as e:
+            logger.error(f"获取抽奖状态时发生错误: {e}")
+            return LotteryStatus.ENDED
     
     def get_info(self) -> Dict[str, Any]:
         """获取抽奖详细信息"""
@@ -514,11 +590,21 @@ class Lottery:
     @classmethod
     def get_lottery_by_name(cls, name: str) -> Optional['Lottery']:
         """根据名称获取抽奖"""
-        with cls._lock:
-            for lottery in cls._lotteries.values():
-                if lottery.data.name == name:
-                    return lottery
-            return None
+        if not name or not isinstance(name, str):
+            raise LotteryOperationError("抽奖名称不能为空且必须是字符串")
+        
+        name = name.strip()
+        if not name:
+            raise LotteryOperationError("抽奖名称不能为空白字符")
+            
+        try:
+            with cls._lock:
+                for lottery in cls._lotteries.values():
+                    if lottery.data.name == name:
+                        return lottery
+                return None
+        except Exception as e:
+            raise LotteryOperationError(f"查询抽奖时发生错误: {e}")
     
     @classmethod
     def get_all_lotteries(cls, status_filter: Optional[LotteryStatus] = None, creator_filter: Optional[str] = None) -> List['Lottery']:
@@ -531,49 +617,80 @@ class Lottery:
             
         Returns:
             List['Lottery']: 符合条件的抽奖列表，按状态和时间排序
+            
+        Raises:
+            LotteryOperationError: 当操作失败时抛出
         """
-        with cls._lock:
-            lotteries = list(cls._lotteries.values())
-            
-            if status_filter:
-                lotteries = [lottery for lottery in lotteries if lottery.get_status() == status_filter]
-            
-            if creator_filter:
-                lotteries = [lottery for lottery in lotteries if lottery.data.creator == creator_filter]
-            
-            # 自定义排序逻辑
-            def sort_key(lottery):
-                status = lottery.get_status()
-                start_time = datetime.fromisoformat(lottery.data.start_time.replace('Z', '+00:00'))
-                end_time = datetime.fromisoformat(lottery.data.end_time.replace('Z', '+00:00'))
+        # 输入验证
+        if status_filter is not None and not isinstance(status_filter, LotteryStatus):
+            raise LotteryOperationError("状态过滤器必须是 LotteryStatus 类型")
+        
+        if creator_filter is not None:
+            if not isinstance(creator_filter, str):
+                raise LotteryOperationError("创建者过滤器必须是字符串类型")
+            creator_filter = creator_filter.strip()
+            if not creator_filter:
+                raise LotteryOperationError("创建者过滤器不能为空白字符")
+        
+        try:
+            with cls._lock:
+                lotteries = list(cls._lotteries.values())
                 
-                # 状态优先级：进行中(1) > 未开始(2) > 已结束(3)
-                if status == LotteryStatus.ACTIVE:
-                    # 进行中的按开始时间倒序（最近开始的在前）
-                    return (1, -start_time.timestamp())
-                elif status == LotteryStatus.PENDING:
-                    # 未开始的按开始时间倒序（最近开始的在前）
-                    return (2, -start_time.timestamp())
-                else:  # ENDED
-                    # 已结束的按结束时间倒序（最近结束的在前）
-                    return (3, -end_time.timestamp())
-            
-            lotteries.sort(key=sort_key)
-            return lotteries
+                if status_filter:
+                    lotteries = [lottery for lottery in lotteries if lottery.get_status() == status_filter]
+                
+                if creator_filter:
+                    lotteries = [lottery for lottery in lotteries if lottery.data.creator == creator_filter]
+                
+                # 自定义排序逻辑
+                def sort_key(lottery):
+                    status = lottery.get_status()
+                    start_time = datetime.fromisoformat(lottery.data.start_time.replace('Z', '+00:00'))
+                    end_time = datetime.fromisoformat(lottery.data.end_time.replace('Z', '+00:00'))
+                    
+                    # 状态优先级：进行中(1) > 未开始(2) > 已结束(3)
+                    if status == LotteryStatus.ACTIVE:
+                        # 进行中的按开始时间倒序（最近开始的在前）
+                        return (1, -start_time.timestamp())
+                    elif status == LotteryStatus.PENDING:
+                        # 未开始的按开始时间倒序（最近开始的在前）
+                        return (2, -start_time.timestamp())
+                    else:  # ENDED
+                        # 已结束的按结束时间倒序（最近结束的在前）
+                        return (3, -end_time.timestamp())
+                
+                lotteries.sort(key=sort_key)
+                return lotteries
+        except Exception as e:
+            raise LotteryOperationError(f"获取抽奖列表时发生错误: {e}")
     
     @classmethod
     def delete_lottery(cls, lottery_id: str) -> bool:
         """删除抽奖"""
-        with cls._lock:
-            if lottery_id in cls._lotteries:
-                del cls._lotteries[lottery_id]
-                
-                # 从磁盘删除
-                if cls._persistence_manager:
-                    cls._persistence_manager.delete_lottery(lottery_id)
-                
-                return True
-            return False
+        if not lottery_id or not isinstance(lottery_id, str):
+            raise LotteryOperationError("抽奖ID不能为空且必须是字符串")
+        
+        lottery_id = lottery_id.strip()
+        if not lottery_id:
+            raise LotteryOperationError("抽奖ID不能为空白字符")
+            
+        try:
+            with cls._lock:
+                if lottery_id in cls._lotteries:
+                    del cls._lotteries[lottery_id]
+                    
+                    # 从磁盘删除
+                    if cls._persistence_manager:
+                        try:
+                            cls._persistence_manager.delete_lottery(lottery_id)
+                        except Exception as e:
+                            # 即使持久化删除失败，内存中的删除也已完成
+                            logger.warning(f"删除抽奖 {lottery_id} 的持久化数据时失败: {e}")
+                    
+                    return True
+                return False
+        except Exception as e:
+            raise LotteryOperationError(f"删除抽奖时发生错误: {e}")
     
     def cancel_lottery(self) -> bool:
         """
@@ -585,23 +702,33 @@ class Lottery:
             bool: 操作是否成功
             
         Raises:
-            LotteryOperationError: 如果抽奖已经结束则抛出错误
+            LotteryOperationError: 如果抽奖已经结束或操作失败时抛出错误
         """
-        with self._lock:
-            status = self.get_status()
-            
-            # 如果抽奖已经结束，不能取消
-            if status == LotteryStatus.ENDED:
-                raise LotteryOperationError("抽奖已经结束，无法取消")
-            
-            # 将结束时间设置为当前时间
-            now = datetime.now(timezone.utc)
-            self.data.end_time = now.isoformat().replace('+00:00', 'Z')
-            
-            # 自动保存到磁盘
-            self._auto_save_if_enabled()
-            
-            return True
+        try:
+            with self._lock:
+                status = self.get_status()
+                
+                # 如果抽奖已经结束，不能取消
+                if status == LotteryStatus.ENDED:
+                    raise LotteryOperationError("抽奖已经结束，无法取消")
+                
+                # 将结束时间设置为当前时间
+                now = datetime.now(timezone.utc)
+                self.data.end_time = now.isoformat().replace('+00:00', 'Z')
+                
+                # 自动保存到磁盘
+                try:
+                    self._auto_save_if_enabled()
+                except Exception as e:
+                    logger.warning(f"取消抽奖时保存数据失败: {e}")
+                    # 继续执行，不让保存失败影响取消操作
+                
+                return True
+        except LotteryOperationError:
+            # 重新抛出业务逻辑错误
+            raise
+        except Exception as e:
+            raise LotteryOperationError(f"取消抽奖时发生错误: {e}")
     
     def start_lottery(self) -> bool:
         """
@@ -613,24 +740,45 @@ class Lottery:
             bool: 操作是否成功
             
         Raises:
-            LotteryOperationError: 如果抽奖已经开始或结束则抛出错误
+            LotteryOperationError: 如果抽奖已经开始、结束或操作失败时抛出错误
         """
-        with self._lock:
-            status = self.get_status()
-            
-            # 如果抽奖已经开始或结束，不能强制开始
-            if status != LotteryStatus.PENDING:
-                raise LotteryOperationError(f"抽奖当前状态为 {status.value}，无法强制开始")
-            
-            # 将开始时间设置为当前时间
-            now = datetime.now(timezone.utc)
-            self.data.start_time = now.isoformat().replace('+00:00', 'Z')
-            
-            # 自动保存到磁盘
-            self._auto_save_if_enabled()
-            
-            return True
+        try:
+            with self._lock:
+                status = self.get_status()
+                
+                # 如果抽奖已经开始或结束，不能强制开始
+                if status != LotteryStatus.PENDING:
+                    raise LotteryOperationError(f"抽奖当前状态为 {status.value}，无法强制开始")
+                
+                # 将开始时间设置为当前时间
+                now = datetime.now(timezone.utc)
+                self.data.start_time = now.isoformat().replace('+00:00', 'Z')
+                
+                # 自动保存到磁盘
+                try:
+                    self._auto_save_if_enabled()
+                except Exception as e:
+                    logger.warning(f"开始抽奖时保存数据失败: {e}")
+                    # 继续执行，不让保存失败影响开始操作
+                
+                return True
+        except LotteryOperationError:
+            # 重新抛出业务逻辑错误
+            raise
+        except Exception as e:
+            raise LotteryOperationError(f"开始抽奖时发生错误: {e}")
     
     def get_user_participation(self, user_id: str) -> Optional[UserParticipation]:
         """获取用户参与信息"""
-        return self.participants.get(user_id)
+        if not user_id or not isinstance(user_id, str):
+            return None
+        
+        user_id = user_id.strip()
+        if not user_id:
+            return None
+            
+        try:
+            return self.participants.get(user_id)
+        except Exception as e:
+            logger.error(f"获取用户参与信息时发生错误: {e}")
+            return None

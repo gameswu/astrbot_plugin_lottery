@@ -120,7 +120,7 @@
 
 在插件的配置中，包括了数项是否启用广播的选项。如果启用相应的广播选项，对应的消息则会被发布到所有参与抽奖的群组中。
 
-## 开发者
+## 🖥️开发者
 
 <a href="https://github.com/gameswu">
   <img src="https://github.com/gameswu.png?size=50">
