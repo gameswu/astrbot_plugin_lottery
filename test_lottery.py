@@ -15,8 +15,8 @@ from datetime import datetime, timezone, timedelta
 # 添加当前目录到path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from lottery import Lottery, LotteryParseError, LotteryOperationError, LotteryStatus
-from persistence import LotteryPersistence
+from .lottery import Lottery, LotteryParseError, LotteryOperationError, LotteryStatus
+from .persistence import LotteryPersistence
 
 
 def get_test_lottery_config():
