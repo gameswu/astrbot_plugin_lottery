@@ -10,7 +10,7 @@ from astrbot.core.utils.session_waiter import (
 from .lottery import Lottery, LotteryStatus, LotteryParseError, LotteryOperationError
 from .persistence import get_persistence_manager
 
-@register("lottery", "gameswu", "支持机器人设置抽奖", "0.1")
+@register("lottery", "gameswu", "支持机器人设置抽奖", "0.1.0")
 class MyPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -94,6 +94,7 @@ class MyPlugin(Star):
                     else:
                         await event.send(event.plain_result(f"抽奖 '{lottery.data.name}' 创建成功，但保存失败！"))
                         logger.warning(f"抽奖创建成功但保存失败: {lottery.data.name}")
+                    controller.stop()
                 except LotteryParseError as e:
                     logger.error(f"抽奖信息解析失败: {e}")
                     await event.send(event.plain_result(f"抽奖信息解析失败：{str(e)}"))
@@ -248,3 +249,6 @@ class MyPlugin(Star):
 
     async def terminate(self):
         """可选择实现异步的插件销毁方法，当插件被卸载/停用时会调用。"""
+        self.context = None
+        self.persistence_manager = None
+        logger.info("Lottery plugin terminated successfully.")
