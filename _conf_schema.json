@@ -1,0 +1,12 @@
+{
+    "enable_create_notification": {
+        "type": "bool",
+        "default": true,
+        "description": "是否启用创建抽奖通知"
+    },
+    "enable_result_notification": {
+        "type": "bool",
+        "default": true,
+        "description": "是否启用结果通知广播"
+    }
+}

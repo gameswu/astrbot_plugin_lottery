@@ -91,7 +91,18 @@
 
 ### 消息广播
 
-当有任一玩家抽中奖品后，机器人会自动发送中奖通知消息到所有参与抽奖的群组。
+在插件的配置中，包括了是否启用创建抽奖通知和结果通知的选项。
+
+若启用相应的选项，当成功创建抽奖或有任一玩家抽中奖品后，机器人会自动发送消息到所有参与抽奖的群组。
+
+## 开发者
+
+<a href="https://github.com/gameswu">
+  <img src="https://github.com/gameswu.png?size=50">
+</a>
+<a href="https://github.com/Tbl0x7D6">
+    <img src="https://github.com/Tbl0x7D6.png?size=50">
+</a>
 
 ## 🧾更新日志
 

@@ -1,6 +1,6 @@
 from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult
 from astrbot.api.star import Context, Star, register
-from astrbot.api import logger
+from astrbot.api import logger, AstrBotConfig
 import astrbot.api.message_components as Comp
 from astrbot.core.utils.session_waiter import (
     session_waiter,
@@ -12,10 +12,16 @@ from .persistence import get_persistence_manager
 
 @register("lottery", "gameswu", "支持机器人设置抽奖", "0.1.0")
 class MyPlugin(Star):
-    def __init__(self, context: Context):
+    def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
         # 初始化数据持久化管理器
         self.persistence_manager = None
+        self.config = config
+
+        # 是否启用创建抽奖通知
+        self.enable_create_notification = self.config.get("enable_create_notification", True)
+        # 是否启用结果通知
+        self.enable_result_notification = self.config.get("enable_result_notification", True)
 
     async def initialize(self):
         """可选择实现异步的插件初始化方法，当实例化该插件类之后会自动调用该方法。"""
@@ -86,11 +92,40 @@ class MyPlugin(Star):
                 info = event.message_str
 
                 try:
-                    lottery = Lottery.parse_and_create(info)
+                    lottery = Lottery.parse_and_create(info, creator=event.get_sender_id())
                     # 使用持久化管理器保存抽奖数据
                     if self.persistence_manager and self.persistence_manager.save_lottery(lottery):
                         await event.send(event.plain_result(f"抽奖 '{lottery.data.name}' 创建并保存成功！"))
                         logger.info(f"成功创建并保存抽奖: {lottery.data.name} (ID: {lottery.id})")
+                        
+                        # 如果启用创建抽奖通知，向参与群聊发布创建信息
+                        if self.enable_create_notification and lottery.data.allowed_groups:
+                            try:
+                                # 构建富媒体消息链
+                                chain = [
+                                    Comp.Plain("🎉 新抽奖活动 🎉\n"),
+                                    Comp.Plain(f"{lottery.data.name}\n"),
+                                    Comp.Plain(f"描述：{lottery.data.description}\n"),
+                                    Comp.Plain(f"活动时间：{lottery.data.start_time} ~ {lottery.data.end_time}\n"),
+                                    Comp.Plain("奖品信息：\n")
+                                ]
+                                
+                                # 添加奖品信息和图片
+                                for i, prize in enumerate(lottery.data.prizes, 1):
+                                    chain.append(Comp.Plain(f"  {i}. {prize.name} - {prize.description}\n"))
+                                    if prize.image_url and prize.image_url.strip():
+                                        try:
+                                            chain.append(Comp.Image.fromURL(prize.image_url))
+                                        except Exception as img_e:
+                                            logger.warning(f"加载奖品图片失败: {prize.image_url}, 错误: {img_e}")
+                                            chain.append(Comp.Plain(f"    [图片加载失败: {prize.image_url}]\n"))
+                                
+                                chain.append(Comp.Plain(f"\n使用命令：/抽奖 参与 {lottery.data.name}"))
+                                
+                                await self.send_notification(lottery, chain)
+                                logger.info(f"已发送抽奖创建通知: {lottery.data.name}")
+                            except Exception as e:
+                                logger.error(f"发送创建通知失败: {e}")
                     else:
                         await event.send(event.plain_result(f"抽奖 '{lottery.data.name}' 创建成功，但保存失败！"))
                         logger.warning(f"抽奖创建成功但保存失败: {lottery.data.name}")
@@ -181,10 +216,32 @@ class MyPlugin(Star):
             # 向用户发送抽奖结果
             yield event.plain_result(message)
             
-            # 如果中奖了，发送通知到相关群
-            if won:
+            # 如果中奖了且启用结果通知，发送通知到相关群
+            if won and self.enable_result_notification:
                 try:
-                    await self.send_notification(event, lottery_name=name, result_message=f"用户 {event.get_sender_id()} 中奖了！奖品：{prize.name if prize else '未知'}")
+                    user_id = event.get_sender_id()
+                    # 构建富媒体中奖通知消息链
+                    chain = [
+                        Comp.Plain("🎊 中奖通知 🎊\n"),
+                        Comp.Plain(f"抽奖名称：{lottery.data.name}\n"),
+                        Comp.Plain(f"中奖用户：{user_id}\n"),
+                        Comp.Plain(f"获得奖品：{prize.name if prize else '未知'}\n")
+                    ]
+                    
+                    if prize:
+                        chain.append(Comp.Plain(f"奖品描述：{prize.description}\n"))
+                        # 如果奖品有图片，添加图片
+                        if prize.image_url and prize.image_url.strip():
+                            try:
+                                chain.append(Comp.Image.fromURL(prize.image_url))
+                            except Exception as img_e:
+                                logger.warning(f"加载中奖奖品图片失败: {prize.image_url}, 错误: {img_e}")
+                                chain.append(Comp.Plain(f"[奖品图片: {prize.image_url}]\n"))
+                    
+                    chain.append(Comp.Plain("恭喜中奖！🎉"))
+                    
+                    await self.send_notification(lottery, chain)
+                    logger.info(f"已发送中奖通知: {user_id} 在 {lottery.data.name} 中获得 {prize.name if prize else '未知奖品'}")
                 except Exception as e:
                     logger.error(f"发送中奖通知失败: {e}")
                     
@@ -195,38 +252,12 @@ class MyPlugin(Star):
             logger.error(f"抽奖命令处理失败: {e}")
             yield event.plain_result("抽奖命令处理失败，请稍后再试。")
 
-    async def send_notification(self, event: AstrMessageEvent, lottery_name: str = None, result_message: str = None): 
+    async def send_notification(self, lottery: Lottery, message_chain_components): 
         """发送抽奖通知到所有允许的群"""
-        if not lottery_name:
+        if not lottery or not lottery.data.allowed_groups or not message_chain_components:
             return
             
         try:
-            # 从持久化存储中获取抽奖信息
-            if not self.persistence_manager:
-                return
-            
-            all_lotteries = self.persistence_manager.load_all_lotteries()
-            lottery = None
-            for lot in all_lotteries.values():
-                if lot.data.name == lottery_name:
-                    lottery = lot
-                    break
-            
-            if not lottery or not lottery.data.allowed_groups:
-                return
-            
-            # 构造通知消息
-            notification_message = f"🎉 抽奖通知 🎉\n"
-            notification_message += f"抽奖名称：{lottery.data.name}\n"
-            if result_message:
-                notification_message += f"结果：{result_message}\n"
-            notification_message += f"描述：{lottery.data.description}"
-            
-            # 创建消息链
-            from astrbot.api.event import MessageChain
-            message_chain = MessageChain()
-            message_chain.message(notification_message)
-            
             # 向所有允许的群发送通知
             for group_id in lottery.data.allowed_groups:
                 # 对于QQ平台（aiocqhttp适配器）
@@ -234,7 +265,7 @@ class MyPlugin(Star):
                 qq_session = f"aiocqhttp:GroupMessage:{group_id}"
                 
                 try:
-                    success = await self.context.send_message(qq_session, message_chain)
+                    success = await self.context.send_message(qq_session, message_chain_components)
                     if success:
                         logger.info(f"成功向群 {group_id} 发送抽奖通知")
                     else:
@@ -242,8 +273,6 @@ class MyPlugin(Star):
                 except Exception as e:
                     logger.error(f"向群 {group_id} 发送通知失败: {e}")
                     
-        except LotteryOperationError as e:
-            logger.error(f"获取抽奖信息失败: {e}")
         except Exception as e:
             logger.error(f"发送抽奖通知失败: {e}")
 
