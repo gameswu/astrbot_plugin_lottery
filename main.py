@@ -23,7 +23,7 @@ class MyPlugin(Star):
         # 是否启用用户中奖广播
         self.enable_result_notification = self.config.get("enable_result_notification", True)
         # 是否启用最终结果广播
-        self.enable_draw_notification = self.config.get("enable_draw_notification", True) # TODO: 定时广播目前未实现
+        self.enable_draw_notification = self.config.get("enable_draw_notification", True)
 
     async def initialize(self):
         """可选择实现异步的插件初始化方法，当实例化该插件类之后会自动调用该方法。"""
@@ -679,6 +679,43 @@ class MyPlugin(Star):
             logger.error(f"构建抽奖详细信息失败: {e}")
             # 返回错误信息
             return Comp.Plain(f"构建抽奖详细信息时发生错误: {str(e)}\n请稍后再试。")
+        
+    async def handle_lottery_end(self, lottery: Lottery):
+        """处理抽奖结束后的逻辑"""
+        try:
+            # 如果启用最终结果通知，向所有允许的群发送抽奖结果
+            if self.enable_draw_notification and lottery.data.allowed_groups:
+                try:
+                    info = (
+                        "🎉 抽奖结果 🎉\n"
+                        f"抽奖名称：{lottery.data.name}\n"
+                        f"抽奖ID：{lottery.id}\n"
+                        f"结束时间：{lottery.data.end_time}\n"
+                        f"总参与人数：{lottery.total_participants}\n"
+                        f"总抽奖次数：{lottery.total_attempts}\n\n"
+                    )
+                    
+                    # 构建富媒体消息链
+                    chain = [
+                        Comp.Plain(info)
+                    ]
+                    
+                    # 添加中奖用户信息
+                    # TODO: 根据实际接口获取中奖用户列表
+                    winners = lottery.get_winners()
+                    if winners:
+                        chain.append(Comp.Plain("中奖用户列表：\n"))
+                        for user_id, prize in winners.items():
+                            chain.append(Comp.Plain(f"  用户 {user_id} 获得奖品 {prize.name}\n"))
+                    else:
+                        chain.append(Comp.Plain("没有用户中奖。\n"))
+                    
+                    await self.send_notification(lottery, MessageChain(chain))
+                    logger.info(f"已发送抽奖结束通知: {lottery.data.name}")
+                except Exception as notify_e:
+                    logger.error(f"发送抽奖结束通知失败: {notify_e}")
+        except Exception as e:
+            logger.error(f"处理抽奖结束时发生错误: {e}")
 
     async def terminate(self):
         """可选择实现异步的插件销毁方法，当插件被卸载/停用时会调用。"""
